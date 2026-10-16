@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Network Alert - Setup Guide</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 10.5pt; line-height: 1.45; color: #1d2733; }
+  h1 { font-size: 22pt; margin: 0 0 4pt; color: #0b3d63; }
+  h2 { font-size: 14pt; margin: 20pt 0 6pt; padding-bottom: 3pt; border-bottom: 2px solid #0b3d63; color: #0b3d63; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 12pt 0 4pt; color: #24507a; page-break-after: avoid; }
+  p { margin: 4pt 0 6pt; }
+  .subtitle { color: #4d5d6c; font-size: 11pt; margin-bottom: 14pt; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.5pt; page-break-inside: avoid; }
+  th, td { border: 1px solid #c4ced8; padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #e8eff6; }
+  code { font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 9pt; background: #f1f4f7; padding: 0 2pt; }
+  pre { font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 8.8pt; background: #f4f6f8; border: 1px solid #d5dde5; border-left: 3px solid #0b3d63; padding: 6pt 8pt; white-space: pre-wrap; page-break-inside: avoid; margin: 4pt 0 8pt; }
+  .change { background: #fff4d6; border: 1px solid #e8c766; padding: 6pt 8pt; margin: 6pt 0 10pt; }
+  .warn { background: #fde8e8; border: 1px solid #e3a0a0; padding: 6pt 8pt; margin: 6pt 0 10pt; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 4pt; margin: 8pt 0 10pt; }
+  .box { border: 1.5px solid #0b3d63; border-radius: 4pt; padding: 4pt 7pt; background: #eef4fa; font-size: 9pt; }
+  .arrow { color: #0b3d63; font-weight: bold; }
+  ol li, ul li { margin-bottom: 3pt; }
+  .step { font-weight: bold; color: #0b3d63; }
+</style>
+</head>
+<body>
+
+<h1>Network Alert</h1>
+<div class="subtitle">Step-by-step setup guide: ping your network on a schedule and get an email when a link goes down or comes back.</div>
+
+<h2>1. What this project does</h2>
+<p>Network Alert is one Python script. A scheduler runs it every 5 minutes. Each run pings a list of addresses you choose, such as your router, your ISP gateway, a server, or <code>8.8.8.8</code> for the internet.</p>
+<ul>
+  <li>When an address stops answering, you get <b>one DOWN email</b>.</li>
+  <li>When it answers again, you get <b>one UP email</b> with the time it went down.</li>
+  <li>While it stays down, no extra mail is sent.</li>
+  <li>If a mail cannot be sent, it is saved and retried on the next run.</li>
+</ul>
+
+<h3>How one run works</h3>
+<div class="flow">
+  <span class="box">Scheduler starts<br>net_alert.py</span><span class="arrow">&rarr;</span>
+  <span class="box">Read config.env</span><span class="arrow">&rarr;</span>
+  <span class="box">Ping every<br>TARGETS address</span><span class="arrow">&rarr;</span>
+  <span class="box">Compare with<br>state/state.json</span><span class="arrow">&rarr;</span>
+  <span class="box">Changed?<br>Send DOWN or UP mail</span><span class="arrow">&rarr;</span>
+  <span class="box">Write state.json<br>and alerts.log</span>
+</div>
+
+<table>
+  <tr><th>Time</th><th>Router reply?</th><th>Miss count</th><th>Mail sent (FAIL_THRESHOLD=1)</th></tr>
+  <tr><td>12:00</td><td>Yes</td><td>0</td><td>None</td></tr>
+  <tr><td>12:05</td><td>No</td><td>1</td><td><b>DOWN</b></td></tr>
+  <tr><td>12:10</td><td>No</td><td>2</td><td>None (already down)</td></tr>
+  <tr><td>12:15</td><td>Yes</td><td>0</td><td><b>UP</b>, with "down since 12:05"</td></tr>
+</table>
+<p>Each check sends 3 pings and waits 2 seconds for each reply. One reply counts as up. Raise <code>FAIL_THRESHOLD</code> to ignore short blips: 3 means about 15 minutes of misses before a mail.</p>
+
+<h2>2. Project files</h2>
+<pre>net-alert/
+  net_alert.py          the checker (run by the scheduler)
+  config.env.example    settings template, copy to config.env
+  config.env            your real settings + mail password   (you create it)
+  requirements.txt      dependency list (no pip packages)
+  install.sh            Linux/macOS setup + cron job
+  uninstall.sh          removes the cron job
+  README.md             short overview
+  .gitignore            keeps config.env and state/ out of Git
+  docs/SETUP_GUIDE.pdf  this guide
+  state/                created at run time
+    alerts.log          one line per check: OK, FAIL, mail sent
+    state.json          up/down and miss count per address
+    pending.json        mails waiting to be retried (only after a send failure)</pre>
+
+<table>
+  <tr><th>File</th><th>Copy to a new PC?</th><th>Notes</th></tr>
+  <tr><td><code>net_alert.py</code></td><td>Yes</td><td>Same file on every machine.</td></tr>
+  <tr><td><code>config.env.example</code></td><td>Yes</td><td>Rename a copy to <code>config.env</code>.</td></tr>
+  <tr><td><code>config.env</code></td><td>No, create new</td><td>Has your IPs and password. Different on each PC. Never share it.</td></tr>
+  <tr><td><code>install.sh</code>, <code>uninstall.sh</code></td><td>Yes (Linux/macOS)</td><td>Not used on Windows.</td></tr>
+  <tr><td><code>state/</code></td><td>No</td><td>Created by the script. Old state from another PC would be wrong.</td></tr>
+</table>
+
+<h2>3. Dependencies</h2>
+<p>No Python packages are needed. <code>requirements.txt</code> is included only to document this, so <code>pip install -r requirements.txt</code> installs nothing.</p>
+<table>
+  <tr><th>Need</th><th>Ubuntu / Debian</th><th>macOS</th><th>Windows</th></tr>
+  <tr><td>Python 3.8 or newer</td><td><code>sudo apt install python3</code></td><td><code>xcode-select --install</code> or python.org</td><td>python.org installer, tick "Add to PATH"</td></tr>
+  <tr><td>ping</td><td><code>sudo apt install iputils-ping</code></td><td>Built in</td><td>Built in</td></tr>
+  <tr><td>Scheduler</td><td><code>sudo apt install cron</code></td><td>cron, built in</td><td>Task Scheduler, built in</td></tr>
+  <tr><td>Mail (smtp mode)</td><td colspan="3">Nothing to install. You need a mail account and an app password.</td></tr>
+  <tr><td>Mail (mutt mode)</td><td><code>sudo apt install mutt postfix</code></td><td colspan="2">Only for office PCs that already relay mail. Most people use smtp mode.</td></tr>
+</table>
+<p>Check Python: <code>python3 --version</code> (Windows: <code>py --version</code>).</p>
+
+<h2>4. Inputs you must change</h2>
+<div class="change">Every line marked <b>CHANGE</b> in <code>config.env</code> must be set for your own PC. The values in the example are placeholders. <b>Replace the example IPs with your own IPs.</b></div>
+<table>
+  <tr><th>Setting</th><th>Example</th><th>What to put</th></tr>
+  <tr><td><code>SITE_NAME</code></td><td><code>Home Network</code></td><td>Name in the subject and sender, for example <code>Home Network</code> or <code>Lab 18</code>.</td></tr>
+  <tr><td><code>MAIL_TO</code></td><td><code>you@example.com</code></td><td>Who gets the mail. Separate people with a comma. <code>Name &lt;a@b.com&gt;</code> also works.</td></tr>
+  <tr><td><code>MAIL_METHOD</code></td><td><code>smtp</code></td><td><code>smtp</code> at home. <code>mutt</code> only on a PC with a working local mail server.</td></tr>
+  <tr><td><code>MAIL_FROM</code></td><td><code>you@gmail.com</code></td><td>Sender address. Usually the same as <code>SMTP_USER</code>.</td></tr>
+  <tr><td><code>SMTP_HOST</code></td><td><code>smtp.gmail.com</code></td><td>Gmail: <code>smtp.gmail.com</code>. Outlook/Microsoft 365: <code>smtp.office365.com</code>.</td></tr>
+  <tr><td><code>SMTP_PORT</code></td><td><code>587</code></td><td>587 with <code>starttls</code>, or 465 with <code>ssl</code>.</td></tr>
+  <tr><td><code>SMTP_SECURITY</code></td><td><code>starttls</code></td><td><code>starttls</code>, <code>ssl</code>, or <code>none</code>.</td></tr>
+  <tr><td><code>SMTP_USER</code></td><td><code>you@gmail.com</code></td><td>Your mail account login.</td></tr>
+  <tr><td><code>SMTP_PASSWORD</code></td><td>(blank)</td><td>An <b>app password</b>, not your normal password. See section 7.</td></tr>
+  <tr><td><code>FAIL_THRESHOLD</code></td><td><code>1</code></td><td>Missed checks before the DOWN mail. 1 is about 5 minutes.</td></tr>
+  <tr><td><code>PING_COUNT</code>, <code>PING_TIMEOUT</code></td><td><code>3</code>, <code>2</code></td><td>Pings per check, and seconds to wait for each.</td></tr>
+  <tr><td><code>TARGETS</code></td><td><code>192.168.1.1=Home router;8.8.8.8=Internet</code></td><td><b>Your IPs.</b> Format <code>ip=label</code>, separated by <code>;</code>.</td></tr>
+  <tr><td>Install folder</td><td><code>~/net-alert</code></td><td>Where you put the files. Used in the scheduler command.</td></tr>
+  <tr><td>Schedule</td><td>every 5 minutes</td><td><code>./install.sh 5</code>, or the Task Scheduler interval.</td></tr>
+</table>
+
+<h3>Finding your own IPs for TARGETS</h3>
+<table>
+  <tr><th>What</th><th>How to find it</th></tr>
+  <tr><td>Your router (default gateway)</td><td>Linux: <code>ip route | grep default</code><br>macOS: <code>netstat -nr | grep default</code><br>Windows: <code>ipconfig</code>, look for "Default Gateway"</td></tr>
+  <tr><td>ISP gateway</td><td>Run <code>traceroute 8.8.8.8</code> (Windows: <code>tracert 8.8.8.8</code>). The first public address after your router is usually the ISP gateway.</td></tr>
+  <tr><td>Internet check</td><td><code>8.8.8.8</code> (Google DNS) or <code>1.1.1.1</code> (Cloudflare).</td></tr>
+  <tr><td>Devices you care about</td><td>Your router's "connected devices" page, or <code>arp -a</code>.</td></tr>
+</table>
+<p>Example: <code>TARGETS=192.168.1.1=Home router;10.0.0.20=NAS;8.8.8.8=Internet</code></p>
+<div class="warn">Ping every address once before adding it, for example <code>ping -c 3 192.168.1.1</code>. If an address never answers ping, for example because a firewall blocks ping, it will send a DOWN mail on the first check.</div>
+
+<h2>5. Step-by-step setup on Linux or macOS</h2>
+<p><span class="step">Step 1.</span> Install the dependencies.</p>
+<pre>sudo apt update
+sudo apt install python3 iputils-ping cron</pre>
+
+<p><span class="step">Step 2.</span> Copy the project folder to your home folder and go into it.</p>
+<pre>cp -r net-alert ~/net-alert
+cd ~/net-alert</pre>
+
+<p><span class="step">Step 3.</span> Run the installer once. It creates <code>config.env</code> and stops.</p>
+<pre>./install.sh</pre>
+
+<p><span class="step">Step 4.</span> Edit <code>config.env</code>. Change every line marked CHANGE, especially <code>MAIL_TO</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, and <code>TARGETS</code>.</p>
+<pre>nano config.env</pre>
+
+<p><span class="step">Step 5.</span> Ping each address in <code>TARGETS</code>.</p>
+<pre>ping -c 3 192.168.1.1</pre>
+
+<p><span class="step">Step 6.</span> Run the installer again. It sends a test mail, runs one check, and adds the cron job.</p>
+<pre>./install.sh        # every 5 minutes
+./install.sh 10     # or every 10 minutes</pre>
+<p>A good run prints <code>mail sent to you@example.com</code>, then the current state, then the cron line:</p>
+<pre>*/5 * * * * /usr/bin/env python3 /home/you/net-alert/net_alert.py</pre>
+
+<p><span class="step">Step 7.</span> Check your inbox for the test mail, and watch the log.</p>
+<pre>tail -f ~/net-alert/state/alerts.log</pre>
+
+<h3>Manual setup without install.sh</h3>
+<pre>cp config.env.example config.env
+chmod 600 config.env
+nano config.env
+python3 net_alert.py --mail-test
+python3 net_alert.py
+crontab -e
+# add this line, with your own path:
+*/5 * * * * /usr/bin/env python3 /home/you/net-alert/net_alert.py</pre>
+
+<h2>6. Step-by-step setup on Windows</h2>
+<p><span class="step">Step 1.</span> Install Python from python.org and tick <b>Add python.exe to PATH</b>.</p>
+<p><span class="step">Step 2.</span> Copy the <code>net-alert</code> folder to, for example, <code>C:\net-alert</code>.</p>
+<p><span class="step">Step 3.</span> Copy <code>config.env.example</code> to <code>config.env</code> and edit it in Notepad.</p>
+<pre>cd C:\net-alert
+copy config.env.example config.env
+notepad config.env</pre>
+<p><span class="step">Step 4.</span> Test mail, then one check.</p>
+<pre>py net_alert.py --mail-test
+py net_alert.py
+py net_alert.py --status</pre>
+<p><span class="step">Step 5.</span> Find the full path of Python.</p>
+<pre>where pythonw</pre>
+<p><span class="step">Step 6.</span> Create a task that runs every 5 minutes. <code>pythonw.exe</code> runs without opening a window. Use the path from Step 5.</p>
+<pre>schtasks /Create /SC MINUTE /MO 5 /TN "NetAlert" ^
+  /TR "\"C:\Users\you\AppData\Local\Programs\Python\Python312\pythonw.exe\" \"C:\net-alert\net_alert.py\""</pre>
+<p>To run it even when you are signed out, open Task Scheduler, find <b>NetAlert</b>, and choose <b>Run whether user is logged on or not</b>.</p>
+<p>Remove it later with <code>schtasks /Delete /TN "NetAlert" /F</code>.</p>
+
+<h2>7. Mail account setup (app password)</h2>
+<h3>Gmail</h3>
+<ol>
+  <li>Open <b>myaccount.google.com</b> and go to <b>Security</b>.</li>
+  <li>Turn on <b>2-Step Verification</b>.</li>
+  <li>Search for <b>App passwords</b> and create one named "Network Alert".</li>
+  <li>Put the 16-character password in <code>SMTP_PASSWORD</code>. Do not include spaces.</li>
+</ol>
+<pre>MAIL_METHOD=smtp
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURITY=starttls
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=abcdefghijklmnop</pre>
+<h3>Outlook / Microsoft 365</h3>
+<pre>SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_SECURITY=starttls</pre>
+<p>Work accounts often need an administrator to allow authenticated SMTP. If login is refused, use a personal Gmail account for the alert.</p>
+<div class="warn"><code>config.env</code> contains this password. Keep it private, do not email it, and do not upload it. <code>.gitignore</code> already keeps it out of Git.</div>
+
+<h2>8. Daily use</h2>
+<table>
+  <tr><th>Task</th><th>Command</th></tr>
+  <tr><td>Run one check now</td><td><code>python3 net_alert.py</code></td></tr>
+  <tr><td>Send a test mail</td><td><code>python3 net_alert.py --mail-test</code></td></tr>
+  <tr><td>Show up/down state</td><td><code>python3 net_alert.py --status</code></td></tr>
+  <tr><td>Watch the log</td><td><code>tail -f state/alerts.log</code></td></tr>
+  <tr><td>See the cron job</td><td><code>crontab -l</code></td></tr>
+  <tr><td>Stop the alert</td><td><code>./uninstall.sh</code> (Windows: <code>schtasks /Delete /TN "NetAlert" /F</code>)</td></tr>
+  <tr><td>Add a person</td><td>Edit <code>MAIL_TO</code>, add <code>,new@example.com</code></td></tr>
+  <tr><td>Add an address</td><td>Edit <code>TARGETS</code>, add <code>;10.0.0.5=Printer</code></td></tr>
+</table>
+<p>Changes to <code>config.env</code> apply on the next run. You do not need to restart anything.</p>
+
+<h3>Log example</h3>
+<pre>2026-10-16 12:00:03 check OK Home router (192.168.1.1)
+2026-10-16 12:05:09 check FAIL 1/1 Home router (192.168.1.1)
+2026-10-16 12:05:09 mail sent to you@example.com: [Home Network] Network DOWN: Home router (192.168.1.1)
+2026-10-16 12:15:04 check UP Home router (192.168.1.1) recovered</pre>
+
+<h2>9. Troubleshooting</h2>
+<table>
+  <tr><th>Problem</th><th>Cause and fix</th></tr>
+  <tr><td><code>Missing config.env</code></td><td>Copy <code>config.env.example</code> to <code>config.env</code>.</td></tr>
+  <tr><td><code>mail FAIL ... Authentication</code></td><td>Wrong <code>SMTP_USER</code> or password. Use an app password, not your normal one.</td></tr>
+  <tr><td><code>mail FAIL ... timed out</code></td><td>Port 587 is blocked. Try <code>SMTP_PORT=465</code> with <code>SMTP_SECURITY=ssl</code>.</td></tr>
+  <tr><td>DOWN mail on first run for a working device</td><td>The device blocks ping. Remove it from <code>TARGETS</code>, or allow ping on that device.</td></tr>
+  <tr><td>No mail when the internet is down</td><td>Expected for smtp mode: mail cannot leave without internet. It is queued in <code>state/pending.json</code> and sent when the link returns.</td></tr>
+  <tr><td>Cron never runs</td><td><code>crontab -l</code> to confirm the line. Make sure the path is absolute and the cron service is running: <code>systemctl status cron</code>.</td></tr>
+  <tr><td>Laptop sleeps</td><td>No checks run while the laptop is asleep. Use a PC, Raspberry Pi, or server that stays on.</td></tr>
+</table>
+
+<h2>10. Limits</h2>
+<ul>
+  <li>It only knows what ping can see. A device that blocks ping looks down.</li>
+  <li>If your gateway still answers ping while something behind it is broken, that line stays up. Add <code>8.8.8.8</code> as a second check.</li>
+  <li>In smtp mode, the DOWN mail for "internet is down" arrives after the internet returns, because it is queued until then.</li>
+</ul>
+
+</body>
+</html>
