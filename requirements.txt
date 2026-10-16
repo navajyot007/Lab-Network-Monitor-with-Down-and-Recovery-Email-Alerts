@@ -1,0 +1,10 @@
+# Python packages: none.
+# net_alert.py uses only the Python standard library
+# (json, smtplib, ssl, subprocess, email, pathlib, ...).
+# `pip install -r requirements.txt` installs nothing, and that is expected.
+#
+# System requirements (install with your OS package manager, not pip):
+#   python3 >= 3.8
+#   ping            Linux: iputils-ping   macOS/Windows: built in
+#   cron            Linux/macOS scheduler (Windows uses Task Scheduler)
+#   mutt + postfix  only if MAIL_METHOD=mutt
